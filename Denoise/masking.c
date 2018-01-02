@@ -24,32 +24,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/
 */
 
 #include <float.h>
-#define _USE_MATH_DEFINES
 #include <math.h>
 
 //Added
 #include <fftw3.h>
 #include "extra_functions.h"
-
-//masking thresholds values recomended by virag
-#define ALPHA_MAX 6.f
-#define ALPHA_MIN 1.f
-#define BETA_MAX 0.02f
-#define BETA_MIN 0.0f
-
-//extra values
-#define N_BARK_BANDS 25
-#define AT_SINE_WAVE_FREQ 1000.f
-#define REFERENCE_LEVEL 90.f //dbSPL level of reproduction
-
-#define BIAS 0
-#define HIGH_FREQ_BIAS 20.f
-#define S_AMP 1.f
-
-#define ARRAYACCESS(a, i, j) ((a)[(i) * N_BARK_BANDS + (j)]) //This is for SSF Matrix recall
-
-//Proposed by Sinha and Tewfik and explained by Virag
-const float relative_thresholds[N_BARK_BANDS] = { -16.f, -17.f, -18.f, -19.f, -20.f, -21.f, -22.f, -23.f, -24.f, -25.f, -25.f, -25.f, -25.f, -25.f, -25.f, -24.f, -23.f, -22.f, -19.f, -18.f, -18.f, -18.f, -18.f, -18.f, -18.f};
+#include "masking.h"
 
 /**
 * Fft to bark bilinear scale transform. This computes the corresponding bark band for

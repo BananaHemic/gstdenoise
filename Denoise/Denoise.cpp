@@ -58,43 +58,7 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
-
-#include <gst/gst.h>
-#include <gst/audio/audio.h>
-#include <gst/audio/gstaudiofilter.h>
-#include <string.h>
-
-GST_DEBUG_CATEGORY_STATIC(audiofiltertemplate_debug);
-#define GST_CAT_DEFAULT audiofiltertemplate_debug
-
-typedef struct _GstAudioFilterTemplate GstAudioFilterTemplate;
-typedef struct _GstAudioFilterTemplateClass GstAudioFilterTemplateClass;
-
-/* These are boilerplate cast macros and type check macros */
-#define GST_TYPE_AUDIO_FILTER_TEMPLATE \
-  (gst_audio_filter_template_get_type())
-#define GST_AUDIO_FILTER_TEMPLATE(obj) \
-  (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_AUDIO_FILTER_TEMPLATE,GstAudioFilterTemplate))
-#define GST_AUDIO_FILTER_TEMPLATE_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_AUDIO_FILTER_TEMPLATE,GstAudioFilterTemplateClass))
-#define GST_IS_AUDIO_FILTER_TEMPLATE(obj) \
-  (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_AUDIO_FILTER_TEMPLATE))
-#define GST_IS_AUDIO_FILTER_TEMPLATE_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_AUDIO_FILTER_TEMPLATE))
-
-struct _GstAudioFilterTemplate
-{
-	GstAudioFilter audiofilter;
-
-	/* here you can add additional per-instance
-	* data such as properties */
-};
-
-struct _GstAudioFilterTemplateClass
-{
-	GstAudioFilterClass audiofilter_class;
-};
-
+#include "Denoise.h"
 
 enum
 {
@@ -107,22 +71,6 @@ enum
 	ARG_0
 	/* FILL ME */
 };
-
-G_DEFINE_TYPE(GstAudioFilterTemplate, gst_audio_filter_template,
-	GST_TYPE_AUDIO_FILTER);
-
-static void gst_audio_filter_template_set_property(GObject * object,
-	guint prop_id, const GValue * value, GParamSpec * pspec);
-static void gst_audio_filter_template_get_property(GObject * object,
-	guint prop_id, GValue * value, GParamSpec * pspec);
-
-static gboolean gst_audio_filter_template_setup(GstAudioFilter * filter,
-	const GstAudioInfo * info);
-static GstFlowReturn gst_audio_filter_template_filter(GstBaseTransform * bt,
-	GstBuffer * outbuf, GstBuffer * inbuf);
-static GstFlowReturn
-gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
-	GstBuffer * buf);
 
 #if 0
 /* This means we support signed 16-bit pcm and signed 32-bit pcm in native
@@ -166,7 +114,7 @@ gst_audio_filter_template_class_init(GstAudioFilterTemplateClass * klass)
 
 	/* here you set up functions to process data (either in place, or from
 	* one input buffer to another output buffer); only one is required */
-	btrans_class->transform = gst_audio_filter_template_filter;
+	//btrans_class->transform = gst_audio_filter_template_filter;
 	btrans_class->transform_ip = gst_audio_filter_template_filter_inplace;
 	/* Set some basic metadata about your new element */
 	gst_element_class_set_details_simple(element_class,
@@ -222,17 +170,17 @@ static gboolean
 gst_audio_filter_template_setup(GstAudioFilter * filter,
 	const GstAudioInfo * info)
 {
-	GstAudioFilterTemplate *filter_template;
+	GstAudioFilterTemplate *self;
 	GstAudioFormat fmt;
 	gint chans, rate;
 
-	filter_template = GST_AUDIO_FILTER_TEMPLATE(filter);
+	self = GST_AUDIO_FILTER_TEMPLATE(filter);
 
 	rate = GST_AUDIO_INFO_RATE(info);
 	chans = GST_AUDIO_INFO_CHANNELS(info);
 	fmt = GST_AUDIO_INFO_FORMAT(info);
 
-	GST_INFO_OBJECT(filter_template, "format %d (%s), rate %d, %d channels",
+	GST_INFO_OBJECT(self, "format %d (%s), rate %d, %d channels",
 		fmt, GST_AUDIO_INFO_NAME(info), rate, chans);
 
 	/* if any setup needs to be done (like memory allocated), do it here */
@@ -240,6 +188,123 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 	/* The audio filter base class also saves the audio info in
 	* GST_AUDIO_FILTER_INFO(filter) so it's automatically available
 	* later from there as well */
+
+	//Sampling related
+	self->samp_rate = (float)rate;
+
+	//FFT related
+	self->fft_size = FFT_SIZE;
+	self->fft_size_2 = self->fft_size/2;
+	self->input_fft_buffer = (float*)calloc(self->fft_size, sizeof(float));
+	self->output_fft_buffer = (float*)calloc(self->fft_size, sizeof(float));
+	self->forward = fftwf_plan_r2r_1d(self->fft_size, self->input_fft_buffer, self->output_fft_buffer, FFTW_R2HC, FFTW_ESTIMATE);
+	self->backward = fftwf_plan_r2r_1d(self->fft_size, self->output_fft_buffer, self->input_fft_buffer, FFTW_HC2R, FFTW_ESTIMATE);
+
+	//STFT window related
+	self->window_option_input = INPUT_WINDOW;
+	self->window_option_output = OUTPUT_WINDOW;
+	self->input_window = (float*)calloc(self->fft_size, sizeof(float));
+	self->output_window = (float*)calloc(self->fft_size, sizeof(float));
+
+	//buffers for OLA
+	self->in_fifo = (float*)calloc(self->fft_size, sizeof(float));
+	self->out_fifo = (float*)calloc(self->fft_size, sizeof(float));
+	self->output_accum = (float*)calloc(self->fft_size*2, sizeof(float));
+	self->overlap_factor = OVERLAP_FACTOR;
+	self->hop = self->fft_size/self->overlap_factor;
+	self->input_latency = self->fft_size - self->hop;
+	self->read_ptr = self->input_latency; //the initial position because we are that many samples ahead
+
+	//soft bypass
+	self->tau = (1.f - expf(-2.f * M_PI * 25.f * 64.f  / self->samp_rate));
+	self->wet_dry = 0.f;
+
+	//Arrays for getting bins info
+	self->fft_p2 = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->fft_magnitude = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->fft_phase = (float*)calloc((self->fft_size_2+1), sizeof(float));
+
+	//noise threshold related
+	self->noise_thresholds_p2 = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->noise_thresholds_scaled = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->noise_window_count = 0.f;
+	self->noise_thresholds_availables = false;
+
+	//noise adaptive estimation related
+	self->auto_thresholds = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->prev_noise_thresholds = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->s_pow_spec = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->prev_s_pow_spec = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->p_min = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->prev_p_min = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->speech_p_p = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->prev_speech_p_p = (float*)calloc((self->fft_size_2+1), sizeof(float));
+
+	//smoothing related
+	self->smoothed_spectrum = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->smoothed_spectrum_prev = (float*)calloc((self->fft_size_2+1), sizeof(float));
+
+	//transient preservation
+	self->transient_preserv_prev = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->tp_window_count = 0.f;
+	self->tp_r_mean = 0.f;
+	self->transient_present = false;
+
+	//masking related
+	self->bark_z = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->absolute_thresholds = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->unity_gain_bark_spectrum = (float*)calloc(N_BARK_BANDS, sizeof(float));
+	self->spreaded_unity_gain_bark_spectrum = (float*)calloc(N_BARK_BANDS, sizeof(float));
+	self->spl_reference_values = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->alpha_masking = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->beta_masking = (float*)calloc((self->fft_size_2+1), sizeof(float));
+	self->SSF = (float*)calloc((N_BARK_BANDS*N_BARK_BANDS), sizeof(float));
+	self->input_fft_buffer_at = (float*)calloc(self->fft_size, sizeof(float));
+	self->output_fft_buffer_at = (float*)calloc(self->fft_size, sizeof(float));
+	self->forward_at = fftwf_plan_r2r_1d(self->fft_size, self->input_fft_buffer_at, self->output_fft_buffer_at, FFTW_R2HC, FFTW_ESTIMATE);
+
+	//reduction gains related
+	self->Gk = (float*)calloc((self->fft_size), sizeof(float));
+
+	//whitening related
+	self->residual_max_spectrum = (float*)calloc((self->fft_size), sizeof(float));
+	self->max_decay_rate = expf(-1000.f/(((WHITENING_DECAY_RATE) * self->samp_rate)/ self->hop));
+	self->whitening_window_count = 0.f;
+
+	//final ensemble related
+	self->residual_spectrum = (float*)calloc((self->fft_size), sizeof(float));
+	self->denoised_spectrum = (float*)calloc((self->fft_size), sizeof(float));
+	self->final_spectrum = (float*)calloc((self->fft_size), sizeof(float));
+
+	//Window combination initialization (pre processing window post processing window)
+	fft_pre_and_post_window(self->input_window, self->output_window,
+													self->fft_size, self->window_option_input,
+													self->window_option_output,	&self->overlap_scale_factor);
+
+	//Set initial gain as unity for the positive part
+	initialize_array(self->Gk,1.f,self->fft_size);
+
+	//Compute adaptive initial thresholds
+	compute_auto_thresholds(self->auto_thresholds, self->fft_size, self->fft_size_2,
+													self->samp_rate);
+
+	//MASKING initializations
+	compute_bark_mapping(self->bark_z, self->fft_size_2, self->samp_rate);
+	compute_absolute_thresholds(self->absolute_thresholds, self->fft_size_2,
+															self->samp_rate);
+	spl_reference(self->spl_reference_values, self->fft_size_2, self->samp_rate,
+								self->input_fft_buffer_at, self->output_fft_buffer_at,
+								&self->forward_at);
+	compute_SSF(self->SSF);
+
+	//Initializing unity gain values for offset normalization
+	initialize_array(self->unity_gain_bark_spectrum,1.f,N_BARK_BANDS);
+	//Convolve unitary energy bark spectrum with SSF
+  convolve_with_SSF(self->SSF, self->unity_gain_bark_spectrum,
+										self->spreaded_unity_gain_bark_spectrum);
+
+	initialize_array(self->alpha_masking,1.f,self->fft_size_2+1);
+	initialize_array(self->beta_masking,0.f,self->fft_size_2+1);
 
 	return TRUE;
 }
@@ -259,6 +324,7 @@ gst_audio_filter_template_filter(GstBaseTransform * base_transform,
 	GstMapInfo map_out;
 
 	GST_LOG_OBJECT(filter, "transform buffer");
+	g_print("NOT ip\n");
 
 	/* FIXME: do something interesting here.  We simply copy the input data
 	* to the output buffer for now. */
@@ -283,6 +349,7 @@ gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
 	GstMapInfo map;
 
 	GST_LOG_OBJECT(filter, "transform buffer in place");
+	//g_print("ip\n");
 
 	/* FIXME: do something interesting here.  Doing nothing means the input
 	* buffer is simply pushed out as is without any modification */

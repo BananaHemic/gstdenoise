@@ -41,5 +41,14 @@
     <ClInclude Include="extra_functions.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Denoise.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="masking.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="estimate_noise_spectrum.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

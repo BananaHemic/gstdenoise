@@ -27,6 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/
 #include <float.h>
 
 #include "extra_functions.h"
+#include "estimate_noise_spectrum.h"
 
 //For louizou algorith
 #define N_SMOOTH 0.7f //Smoothing over the power spectrum [0.9 - previous / 0.7 - actual]

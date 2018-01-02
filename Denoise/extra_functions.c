@@ -143,7 +143,7 @@ parabolic_interpolation(float left_val, float middle_val, float right_val,
 * \param size the size of the array
 */
 void
-initialize_array(float* array, float value,int size)
+initialize_array(float * array, float value,int size)
 {
 	for(int k=0; k<size;k++)
 	{
