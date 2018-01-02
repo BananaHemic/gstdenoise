@@ -31,6 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/
 //#include "masking.c"
 //Added
 #include "extra_functions.h"
+#include "spectral_processing.h"
 
 //------------GAIN AND THRESHOLD CALCULATION---------------
 

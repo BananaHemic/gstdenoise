@@ -142,6 +142,7 @@
     <ClInclude Include="estimate_noise_spectrum.h" />
     <ClInclude Include="extra_functions.h" />
     <ClInclude Include="masking.h" />
+    <ClInclude Include="spectral_processing.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

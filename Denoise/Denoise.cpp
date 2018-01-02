@@ -80,8 +80,10 @@ enum
 #endif
 
 /* For simplicity only support 16-bit pcm in native endianness for starters */
+//#define SUPPORTED_CAPS_STRING \
+    //GST_AUDIO_CAPS_MAKE(GST_AUDIO_NE(S16))
 #define SUPPORTED_CAPS_STRING \
-    GST_AUDIO_CAPS_MAKE(GST_AUDIO_NE(S16))
+    GST_AUDIO_CAPS_MAKE(GST_AUDIO_NE(F32))
 
 /* GObject vmethod implementations */
 static void
@@ -306,6 +308,19 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 	initialize_array(self->alpha_masking,1.f,self->fft_size_2+1);
 	initialize_array(self->beta_masking,0.f,self->fft_size_2+1);
 
+	// Added
+	self->enable = 1.f;
+	self->release = 0;
+	self->amount_of_reduction = 0;
+	self->noise_thresholds_offset = 0;
+	self->whitening_factor_pc = 0;
+	self->adaptive_state = 1.0f;
+	self->masking = 0;
+	self->transient_protection = 0;
+	self->residual_listen = 0;
+	self->noise_learn_state = 0;
+	self->reset_profile = 0;
+
 	return TRUE;
 }
 
@@ -344,38 +359,225 @@ static GstFlowReturn
 gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
 	GstBuffer * buf)
 {
-	GstAudioFilterTemplate *filter = GST_AUDIO_FILTER_TEMPLATE(base_transform);
+	GstAudioFilterTemplate *self = GST_AUDIO_FILTER_TEMPLATE(base_transform);
 	GstFlowReturn flow = GST_FLOW_OK;
 	GstMapInfo map;
 
-	GST_LOG_OBJECT(filter, "transform buffer in place");
-	//g_print("ip\n");
+	GST_LOG_OBJECT(self, "transform buffer in place");
 
-	/* FIXME: do something interesting here.  Doing nothing means the input
-	* buffer is simply pushed out as is without any modification */
-	if (gst_buffer_map(buf, &map, GST_MAP_READWRITE)) {
-#if 0
-		switch (GST_AUDIO_FILTER_FORMAT(filter)) {
-		case GST_AUDIO_FORMAT_S16LE:
-		case GST_AUDIO_FORMAT_S16BE: {
-			gint16 *samples = map.data;
-			guint n_samples = map.size / sizeof(gint16);
-			guint i;
-
-			for (i = 0; i < n; ++n) {
-				samples[i] = samples[i];
-			}
-			break;
-		}
-		default:
-			g_warning("Unexpected audio format %s!",
-				GST_AUDIO_INFO_NAME(GST_AUDIO_FILTER_INFO(filter)));
-			flow = GST_FLOW_ERROR;
-			break;
-		}
-#endif
-		gst_buffer_unmap(buf, &map);
+	//Softbypass targets in case of disabled or enabled
+	if(self->enable == 0.f)
+	{ //if disabled
+		self->wet_dry_target = 0.f;
 	}
+	else
+	{ //if enabled
+		self->wet_dry_target = 1.f;
+	}
+	//Interpolate parameters over time softly to bypass without clicks or pops
+	self->wet_dry += self->tau * (self->wet_dry_target - self->wet_dry) + FLT_MIN;
+
+	//Parameters values
+	/*exponential decay coefficients for envelopes and adaptive noise profiling
+		These must take into account the hop size as explained in the following paper
+		FFT-BASED DYNAMIC RANGE COMPRESSION*/
+	if (self->release != 0.f) //This allows to turn off smoothing with 0 ms in order to use masking only
+	{
+		self->release_coeff = expf(-1000.f/(((self->release) * self->samp_rate)/ self->hop));
+	}
+	else
+	{
+		self->release_coeff = 0.f; //This avoids incorrect results when moving sliders rapidly
+	}
+
+	self->amount_of_reduction_linear = from_dB(-1.f * self->amount_of_reduction);
+	self->thresholds_offset_linear = from_dB(self->noise_thresholds_offset);
+	self->whitening_factor = self->whitening_factor_pc / 100.f;
+
+	if (!gst_buffer_map(buf, &map, GST_MAP_READWRITE)) {
+		g_print("Failed mapping!\n");
+		return GST_FLOW_ERROR;
+	}
+	guint n_samples = 0;
+	gint k = 0;
+	float *samples = (float*) map.data;
+	switch (GST_AUDIO_FILTER_FORMAT(self)) {
+	//case GST_AUDIO_FORMAT_S16LE:
+	//case GST_AUDIO_FORMAT_S16BE: {
+	case GST_AUDIO_FORMAT_F32LE: {
+		//gint16 *samples = (gint16*) map.data;
+		n_samples = map.size / sizeof(float);
+			//main loop for processing
+		for (int pos = 0; pos < n_samples; pos++)
+		{
+			//Store samples int the input buffer
+			//self->in_fifo[self->read_ptr] = self->input[pos];
+			self->in_fifo[self->read_ptr] = samples[pos];
+			//Output samples in the output buffer (even zeros introduced by latency)
+			//self->output[pos] = self->out_fifo[self->read_ptr - self->input_latency];
+			samples[pos] = self->out_fifo[self->read_ptr - self->input_latency];
+			//Now move the read pointer
+			self->read_ptr++;
+
+			//Once the buffer is full we can do stuff
+			if (self->read_ptr < self->fft_size)
+				continue;
+			//g_print("full\n");
+			//Reset the input buffer position
+			self->read_ptr = self->input_latency;
+
+			//----------STFT Analysis------------
+
+			//Adding and windowing the frame input values in the center (zero-phasing)
+			for (k = 0; k < self->fft_size; k++)
+			{
+				self->input_fft_buffer[k] = self->in_fifo[k] * self->input_window[k];
+			}
+
+			//----------FFT Analysis------------
+
+			//Do transform
+			fftwf_execute(self->forward);
+
+			//-----------GET INFO FROM BINS--------------
+
+			get_info_from_bins(self->fft_p2, self->fft_magnitude, self->fft_phase,
+				self->fft_size_2, self->fft_size,
+				self->output_fft_buffer);
+
+			/////////////////////SPECTRAL PROCESSING//////////////////////////
+
+			/*This section countains the specific noise reduction processing blocks
+				but it could be replaced with any spectral processing (I'm looking at you future tinkerer)
+				Parameters for the STFT transform can be changed at the top of this file
+			*/
+
+			//If the spectrum is not silence
+			if (!is_empty(self->fft_p2, self->fft_size_2))
+			{
+				//If adaptive noise is selected the noise is adapted in time
+				if (self->adaptive_state == 1.f)
+				{
+					//This has to be revised(issue 8 on github)
+					adapt_noise(self->fft_p2, self->fft_size_2, self->noise_thresholds_p2,
+						self->auto_thresholds, self->prev_noise_thresholds,
+						self->s_pow_spec, self->prev_s_pow_spec, self->p_min,
+						self->prev_p_min, self->speech_p_p, self->prev_speech_p_p);
+
+					self->noise_thresholds_availables = true;
+				}
+
+				/*If selected estimate noise spectrum is based on selected portion of signal
+				 *do not process the signal
+				 */
+				if (self->noise_learn_state == 1.f)
+				{ //MANUAL
+
+					//Increase window count for rolling mean
+					self->noise_window_count++;
+
+					get_noise_statistics(self->fft_p2, self->fft_size_2,
+						self->noise_thresholds_p2, self->noise_window_count);
+
+					self->noise_thresholds_availables = true;
+				}
+				else
+				{
+					//If there is a noise profile reduce noise
+					if (self->noise_thresholds_availables == true)
+					{
+						//Detector smoothing and oversubtraction
+						preprocessing(self->thresholds_offset_linear, self->fft_p2,
+							self->noise_thresholds_p2, self->noise_thresholds_scaled,
+							self->smoothed_spectrum, self->smoothed_spectrum_prev,
+							self->fft_size_2, self->bark_z, self->absolute_thresholds,
+							self->SSF, self->release_coeff,
+							self->spreaded_unity_gain_bark_spectrum,
+							self->spl_reference_values, self->alpha_masking,
+							self->beta_masking, self->masking, self->adaptive_state,
+							self->amount_of_reduction_linear, self->transient_preserv_prev,
+							&self->tp_window_count, &self->tp_r_mean,
+							&self->transient_present, self->transient_protection);
+
+						//Supression rule
+						spectral_gain(self->fft_p2, self->noise_thresholds_p2,
+							self->noise_thresholds_scaled, self->smoothed_spectrum,
+							self->fft_size_2, self->adaptive_state, self->Gk,
+							self->transient_protection, self->transient_present);
+
+						//apply gains
+						denoised_calulation(self->fft_size, self->output_fft_buffer,
+							self->denoised_spectrum, self->Gk);
+
+						//residual signal
+						residual_calulation(self->fft_size, self->output_fft_buffer,
+							self->residual_spectrum, self->denoised_spectrum,
+							self->whitening_factor, self->residual_max_spectrum,
+							&self->whitening_window_count, self->max_decay_rate);
+
+						//Ensemble the final spectrum using residual and denoised
+						final_spectrum_ensemble(self->fft_size, self->final_spectrum,
+							self->residual_spectrum,
+							self->denoised_spectrum,
+							self->amount_of_reduction_linear,
+							self->residual_listen);
+
+						soft_bypass(self->final_spectrum, self->output_fft_buffer,
+							self->wet_dry, self->fft_size);
+					}
+				}
+			}
+
+			///////////////////////////////////////////////////////////
+
+			//----------STFT Synthesis------------
+
+			//------------FFT Synthesis-------------
+
+			//Do inverse transform
+			fftwf_execute(self->backward);
+
+			//Normalizing value
+			for (k = 0; k < self->fft_size; k++)
+			{
+				self->input_fft_buffer[k] = self->input_fft_buffer[k] / self->fft_size;
+			}
+
+			//------------OVERLAPADD-------------
+
+			//Windowing scaling and accumulation
+			for (k = 0; k < self->fft_size; k++)
+			{
+				self->output_accum[k] += (self->output_window[k] * self->input_fft_buffer[k]) / (self->overlap_scale_factor * self->overlap_factor);
+			}
+
+			//Output samples up to the hop size
+			for (k = 0; k < self->hop; k++)
+			{
+				self->out_fifo[k] = self->output_accum[k];
+			}
+
+			//shift FFT accumulator the hop size
+			memmove(self->output_accum, self->output_accum + self->hop,
+				self->fft_size * sizeof(float));
+
+			//move input FIFO
+			for (k = 0; k < self->input_latency; k++)
+			{
+				self->in_fifo[k] = self->in_fifo[k + self->hop];
+			}
+			//-------------------------------
+		}
+		break;
+	}
+	default:
+		g_warning("Unexpected audio format %s!",
+			GST_AUDIO_INFO_NAME(GST_AUDIO_FILTER_INFO(self)));
+		g_print("format err!\n");
+		flow = GST_FLOW_ERROR;
+		break;
+	}
+	gst_buffer_unmap(buf, &map);
 
 	return flow;
 }

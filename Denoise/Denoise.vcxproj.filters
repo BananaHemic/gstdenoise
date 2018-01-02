@@ -50,5 +50,8 @@
     <ClInclude Include="estimate_noise_spectrum.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="spectral_processing.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

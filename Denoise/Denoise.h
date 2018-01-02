@@ -10,6 +10,7 @@ extern "C" {
 #include "extra_functions.h"
 #include "masking.h"
 #include "estimate_noise_spectrum.h"
+#include "spectral_processing.h"
 }
 
 //STFT default values
@@ -49,17 +50,17 @@ struct _GstAudioFilterTemplate
 	float samp_rate; //Sample rate received from the host
 
 	//Parameters for the algorithm (user input)
-	float* amount_of_reduction; //Amount of noise to reduce in dB
-	float* noise_thresholds_offset; //This is to scale the noise profile (over subtraction factor)
-	float* release; //Release time
-	float* masking; //Masking scaling
-	float* whitening_factor_pc;	//Whitening amount of the reduction percentage
-	float* noise_learn_state; //Learn Noise state (Manual-Off-Auto)
-	float* adaptive_state; //Autocapture switch
-	float* reset_profile; //Reset Noise switch
-	float* residual_listen; //For noise only listening
-	float* transient_protection; //Multiplier for thresholding onsets with rolling mean
-	float* enable; //For soft bypass (click free bypass)
+	float amount_of_reduction; //Amount of noise to reduce in dB
+	float noise_thresholds_offset; //This is to scale the noise profile (over subtraction factor)
+	float release; //Release time
+	float masking; //Masking scaling
+	float whitening_factor_pc;	//Whitening amount of the reduction percentage
+	float noise_learn_state; //Learn Noise state (Manual-Off-Auto)
+	float adaptive_state; //Autocapture switch
+	float reset_profile; //Reset Noise switch
+	float residual_listen; //For noise only listening
+	float transient_protection; //Multiplier for thresholding onsets with rolling mean
+	float enable; //For soft bypass (click free bypass)
 	float* report_latency; //Latency necessary
 
 	//Parameters values and arrays for the STFT
