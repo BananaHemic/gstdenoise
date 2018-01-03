@@ -311,14 +311,22 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 	// Added
 	self->enable = 1.f;
 	self->release = 0;
-	self->amount_of_reduction = 0;
-	self->noise_thresholds_offset = 0;
+	self->amount_of_reduction = 20.0f;
+	self->noise_thresholds_offset = 10;
 	self->whitening_factor_pc = 0;
-	self->adaptive_state = 1.0f;
-	self->masking = 0;
+	self->masking = 1;
 	self->transient_protection = 0;
+	
+	// Listen to the removed signal
 	self->residual_listen = 0;
+
+	// automagically determine the noise of the system
+	self->adaptive_state = 1.0f;
+
+	// if on, this will assume all incoming data is noise, and will build a noise profile accordingly
 	self->noise_learn_state = 0;
+
+	// unused
 	self->reset_profile = 0;
 
 	return TRUE;

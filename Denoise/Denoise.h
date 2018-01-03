@@ -51,7 +51,7 @@ struct _GstAudioFilterTemplate
 
 	//Parameters for the algorithm (user input)
 	float amount_of_reduction; //Amount of noise to reduce in dB
-	float noise_thresholds_offset; //This is to scale the noise profile (over subtraction factor)
+	float noise_thresholds_offset; //This is to scale the noise profile (over subtraction factor) in dB
 	float release; //Release time
 	float masking; //Masking scaling
 	float whitening_factor_pc;	//Whitening amount of the reduction percentage
