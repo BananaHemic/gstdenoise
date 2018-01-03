@@ -114,6 +114,8 @@ gst_audio_filter_template_class_init(GstAudioFilterTemplateClass * klass)
 	* first buffer comes in, and whenever the format changes */
 	audio_filter_class->setup = gst_audio_filter_template_setup;
 
+	btrans_class->stop = gst_audio_filter_template_stop;
+
 	/* here you set up functions to process data (either in place, or from
 	* one input buffer to another output buffer); only one is required */
 	//btrans_class->transform = gst_audio_filter_template_filter;
@@ -330,6 +332,78 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 	self->reset_profile = 0;
 
 	return TRUE;
+}
+
+static gboolean
+gst_audio_filter_template_stop(GstBaseTransform *trans) {
+	g_print("Stopping!\n");
+	GstAudioFilterTemplate *self = GST_AUDIO_FILTER_TEMPLATE(trans);
+
+	free(self->input_fft_buffer);
+	free(self->output_fft_buffer);
+	fftwf_destroy_plan(self->forward);
+	fftwf_destroy_plan(self->backward);
+
+	//STFT window related
+	free(self->input_window);
+	free(self->output_window);
+
+	//buffers for OLA
+	free(self->in_fifo);
+	free(self->out_fifo );
+	free(self->output_accum );
+
+	//Arrays for getting bins info
+	free(self->fft_p2);
+	free(self->fft_magnitude);
+	free(self->fft_phase);
+
+	//noise threshold related
+	free(self->noise_thresholds_p2);
+	free(self->noise_thresholds_scaled);
+
+	//noise adaptive estimation related
+	free(self->auto_thresholds);
+	free(self->prev_noise_thresholds);
+	free(self->s_pow_spec);
+	free(self->prev_s_pow_spec);
+	free(self->p_min);
+	free(self->prev_p_min);
+	free(self->speech_p_p);
+	free(self->prev_speech_p_p);
+
+	//smoothing related
+	free(self->smoothed_spectrum);
+	free(self->smoothed_spectrum_prev);
+
+	//transient preservation
+	free(self->transient_preserv_prev);
+
+	//masking related
+	free(self->bark_z);
+	free(self->absolute_thresholds);
+	free(self->unity_gain_bark_spectrum);
+	free(self->spreaded_unity_gain_bark_spectrum);
+	free(self->spl_reference_values);
+	free(self->alpha_masking);
+	free(self->beta_masking);
+	free(self->SSF);
+	free(self->input_fft_buffer_at);
+	free(self->output_fft_buffer_at);
+	fftwf_destroy_plan(self->forward_at);
+
+	//reduction gains related
+	free(self->Gk);
+
+	//whitening related
+	free(self->residual_max_spectrum);
+
+	//final ensemble related
+	free(self->residual_spectrum);
+	free(self->denoised_spectrum);
+	free(self->final_spectrum);
+
+	return true;
 }
 
 /* You may choose to implement either a copying filter or an

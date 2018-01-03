@@ -175,3 +175,5 @@ static GstFlowReturn gst_audio_filter_template_filter(GstBaseTransform * bt,
 static GstFlowReturn
 gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
 	GstBuffer * buf);
+static gboolean
+gst_audio_filter_template_stop(GstBaseTransform *trans);
