@@ -323,13 +323,36 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 	self->residual_listen = 0;
 
 	// automagically determine the noise of the system
-	self->adaptive_state = 1.0f;
+	//self->adaptive_state = 1.0f;
+	self->adaptive_state = 0;
 
 	// if on, this will assume all incoming data is noise, and will build a noise profile accordingly
 	self->noise_learn_state = 0;
+	//self->noise_learn_state = 1.f;
 
 	// unused
 	self->reset_profile = 0;
+
+
+	// If configured, load a noise profile from a file
+	if (self->noise_learn_state == 0.f && self->adaptive_state == 0.f){
+		g_print("Will load noise data from file\n");
+		FILE *save_file;
+		if (0 != fopen_s(&save_file, "noise.fft", "r")) {
+			g_print("Failed loading noise file\n");
+		}
+		else {
+			const int BUFF_SIZE = 32;
+			char str_buff[BUFF_SIZE];
+			for (int i = 0; i < self->fft_size_2 + 1; i++) {
+				fgets(str_buff, BUFF_SIZE, save_file);
+				self->noise_thresholds_p2[i] = atof(str_buff);
+				memset(str_buff, 0, sizeof(str_buff));
+			}
+			self->noise_thresholds_availables = true;
+			g_print("Noise print fully loaded from file\n");
+		}
+	}
 
 	return TRUE;
 }
@@ -339,6 +362,26 @@ gst_audio_filter_template_stop(GstBaseTransform *trans) {
 	g_print("Stopping!\n");
 	GstAudioFilterTemplate *self = GST_AUDIO_FILTER_TEMPLATE(trans);
 
+	// If we have a noise profile, save it to a file
+	if (self->noise_learn_state == 1.f && self->noise_thresholds_availables){
+		//get_noise_statistics(self->fft_p2, self->fft_size_2,
+			//self->noise_thresholds_p2, self->noise_window_count);
+		g_print("Will save noise data to file\n");
+		FILE *save_file;
+		if (0 != fopen_s(&save_file, "noise.fft", "w")) {
+			g_print("Failed saving noise file\n");
+		}
+		else {
+			for (int i = 0; i < self->fft_size_2 + 1; i++) {
+				gchar* str = g_strdup_printf("%f\n", self->noise_thresholds_p2[i]);
+				fputs(str, save_file);
+				g_free(str);
+			}
+			g_print("Noise print saved\n");
+		}
+	}
+
+	// Cleanup memory
 	free(self->input_fft_buffer);
 	free(self->output_fft_buffer);
 	fftwf_destroy_plan(self->forward);
