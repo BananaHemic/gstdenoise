@@ -68,9 +68,28 @@ enum
 
 enum
 {
-	ARG_0
-	/* FILL ME */
+	PROP_0,
+	PROP_RELEASE_TIME,
+	PROP_INTENSITY,
+	PROP_NOISE_OFFSET,
+	PROP_WHITENING_FACTOR,
+	PROP_MASKING,
+	PROP_TRANSIENT_PROTECTION,
+	PROP_RESIDUAL,
+	PROP_AUTO_LEARN,
+	PROP_BUILD_NOISE_PROFILE,
+	PROP_NOISE_FILE
 };
+#define DEF_RELEASE_TIME 0
+#define DEF_INTENSITY 20.0f
+#define DEF_NOISE_OFFSET 2
+#define DEF_WHITENING_FACTOR 0
+#define DEF_MASKING 1.0f
+#define DEF_TRANSIENT_PROTECTION 0
+#define DEF_RESIDUAL FALSE
+#define DEF_AUTO_LEARN 0
+#define DEF_BUILD_NOISE_PROFILE FALSE
+#define DEF_NOISE_FILE "noise.fft"
 
 #if 0
 /* This means we support signed 16-bit pcm and signed 32-bit pcm in native
@@ -110,6 +129,57 @@ gst_audio_filter_template_class_init(GstAudioFilterTemplateClass * klass)
 	gobject_class->set_property = gst_audio_filter_template_set_property;
 	gobject_class->get_property = gst_audio_filter_template_get_property;
 
+	// All our properties
+	g_object_class_install_property(gobject_class, PROP_RELEASE_TIME,
+		g_param_spec_float("release-time", "release time (ms)",
+			"How quickly to smooth (ms)", 0, G_MAXFLOAT, DEF_RELEASE_TIME,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+	g_object_class_install_property(gobject_class, PROP_INTENSITY,
+		g_param_spec_float("intensity", "reduction intensity (db)",
+			"How much to reduce the noise in db", 0, G_MAXFLOAT, DEF_INTENSITY,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+	g_object_class_install_property(gobject_class, PROP_NOISE_OFFSET,
+		g_param_spec_float("noise-offset", "noise offset(db)",
+			"How much to scale the noise profile (db)", 0, G_MAXFLOAT, DEF_NOISE_OFFSET,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+	g_object_class_install_property(gobject_class, PROP_WHITENING_FACTOR,
+		g_param_spec_float("whiten", "whiten amount (%)",
+			"How much white noise to add (%)", 0, G_MAXFLOAT, DEF_WHITENING_FACTOR,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+	g_object_class_install_property(gobject_class, PROP_MASKING,
+		g_param_spec_float("mask", "mask noise",
+			"???", 0, G_MAXFLOAT, DEF_MASKING,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+	g_object_class_install_property(gobject_class, PROP_TRANSIENT_PROTECTION,
+		g_param_spec_float("transient-protection", "transient protection",
+			"Multiplier for thresholding onsets with rolling mean", 0, G_MAXFLOAT, DEF_TRANSIENT_PROTECTION,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+	g_object_class_install_property(gobject_class, PROP_RESIDUAL,
+		g_param_spec_boolean("residual", "residual listen",
+			"Listen to residual noise, with signal removed", DEF_RESIDUAL,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+	g_object_class_install_property(gobject_class, PROP_AUTO_LEARN,
+		g_param_spec_float("auto", "auto learn",
+			"Automatically learn and apply noise profile", 0, G_MAXFLOAT, DEF_AUTO_LEARN,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+	g_object_class_install_property(gobject_class, PROP_BUILD_NOISE_PROFILE,
+		g_param_spec_boolean("build-noise", "build noise profile",
+			"Assume all input is noise, and create noise profile accordingly", DEF_BUILD_NOISE_PROFILE,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+	g_object_class_install_property(gobject_class, PROP_NOISE_FILE,
+		g_param_spec_string("filename", "filename",
+			"Filename that the noise profile should be saved/loaded from", DEF_NOISE_FILE,
+			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
 	/* this function will be called when the format is set before the
 	* first buffer comes in, and whenever the format changes */
 	audio_filter_class->setup = gst_audio_filter_template_setup;
@@ -135,9 +205,22 @@ gst_audio_filter_template_class_init(GstAudioFilterTemplateClass * klass)
 static void
 gst_audio_filter_template_init(GstAudioFilterTemplate * filter)
 {
-	/* This function is called when a new filter object is created. You
-	* would typically do things like initialise properties to their
-	* default values here if needed. */
+	GstAudioFilterTemplate *self;
+	self = GST_AUDIO_FILTER_TEMPLATE(filter);
+
+	self->release = DEF_RELEASE_TIME;
+	self->amount_of_reduction = DEF_INTENSITY;
+	self->noise_thresholds_offset = DEF_NOISE_OFFSET;
+	self->whitening_factor = DEF_WHITENING_FACTOR;
+	self->masking = DEF_MASKING;
+	self->transient_protection = DEF_TRANSIENT_PROTECTION;
+	self->residual_listen = DEF_RESIDUAL;
+	self->adaptive_state = DEF_AUTO_LEARN;
+	self->noise_learn_state = DEF_BUILD_NOISE_PROFILE;
+
+	free(self->file_location);
+	self->file_location = g_strdup(DEF_NOISE_FILE);
+	g_print("init\n");
 }
 
 static void
@@ -148,6 +231,38 @@ gst_audio_filter_template_set_property(GObject * object, guint prop_id,
 
 	GST_OBJECT_LOCK(filter);
 	switch (prop_id) {
+	case PROP_RELEASE_TIME:
+		filter->release = g_value_get_float(value);
+		break;
+	case PROP_INTENSITY:
+		filter->amount_of_reduction = g_value_get_float(value);
+		break;
+	case PROP_NOISE_OFFSET:
+		filter->noise_thresholds_offset = g_value_get_float(value);
+		break;
+	case PROP_WHITENING_FACTOR:
+		filter->whitening_factor = g_value_get_float(value);
+		break;
+	case PROP_MASKING:
+		filter->masking = g_value_get_float(value);
+		break;
+	case PROP_TRANSIENT_PROTECTION:
+		filter->transient_protection = g_value_get_float(value);
+		break;
+	case PROP_RESIDUAL:
+		filter->residual_listen = g_value_get_boolean(value);
+		break;
+	case PROP_AUTO_LEARN:
+		filter->adaptive_state = g_value_get_float(value);
+		break;
+	case PROP_BUILD_NOISE_PROFILE:
+		filter->noise_learn_state = g_value_get_boolean(value);
+		break;
+	case PROP_NOISE_FILE:
+		g_free(filter->file_location);
+		g_print("Set noise file\n");
+		filter->file_location = g_value_dup_string(value);
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 		break;
@@ -312,33 +427,14 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 
 	// Added
 	self->enable = 1.f;
-	self->release = 0;
-	self->amount_of_reduction = 20.0f;
-	self->noise_thresholds_offset = 10;
-	self->whitening_factor_pc = 0;
-	self->masking = 1;
-	self->transient_protection = 0;
-	
-	// Listen to the removed signal
-	self->residual_listen = 0;
-
-	// automagically determine the noise of the system
-	//self->adaptive_state = 1.0f;
-	self->adaptive_state = 0;
-
-	// if on, this will assume all incoming data is noise, and will build a noise profile accordingly
-	self->noise_learn_state = 0;
-	//self->noise_learn_state = 1.f;
-
 	// unused
 	self->reset_profile = 0;
 
-
 	// If configured, load a noise profile from a file
-	if (self->noise_learn_state == 0.f && self->adaptive_state == 0.f){
-		g_print("Will load noise data from file\n");
+	if (!self->noise_learn_state && self->adaptive_state == 0.f){
+		g_print("Will load noise data from file:\"%s\"\n", self->file_location);
 		FILE *save_file;
-		if (0 != fopen_s(&save_file, "noise.fft", "r")) {
+		if (0 != fopen_s(&save_file, self->file_location, "r")) {
 			g_print("Failed loading noise file\n");
 		}
 		else {
@@ -363,12 +459,12 @@ gst_audio_filter_template_stop(GstBaseTransform *trans) {
 	GstAudioFilterTemplate *self = GST_AUDIO_FILTER_TEMPLATE(trans);
 
 	// If we have a noise profile, save it to a file
-	if (self->noise_learn_state == 1.f && self->noise_thresholds_availables){
+	if (self->noise_learn_state && self->noise_thresholds_availables){
 		//get_noise_statistics(self->fft_p2, self->fft_size_2,
 			//self->noise_thresholds_p2, self->noise_window_count);
 		g_print("Will save noise data to file\n");
 		FILE *save_file;
-		if (0 != fopen_s(&save_file, "noise.fft", "w")) {
+		if (0 != fopen_s(&save_file, self->file_location, "w")) {
 			g_print("Failed saving noise file\n");
 		}
 		else {
@@ -377,11 +473,14 @@ gst_audio_filter_template_stop(GstBaseTransform *trans) {
 				fputs(str, save_file);
 				g_free(str);
 			}
+			fclose(save_file);
 			g_print("Noise print saved\n");
 		}
 	}
 
 	// Cleanup memory
+	g_free(self->file_location);
+
 	free(self->input_fft_buffer);
 	free(self->output_fft_buffer);
 	fftwf_destroy_plan(self->forward);
@@ -595,7 +694,7 @@ gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
 				/*If selected estimate noise spectrum is based on selected portion of signal
 				 *do not process the signal
 				 */
-				if (self->noise_learn_state == 1.f)
+				if (self->noise_learn_state)
 				{ //MANUAL
 
 					//Increase window count for rolling mean

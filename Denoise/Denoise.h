@@ -55,13 +55,14 @@ struct _GstAudioFilterTemplate
 	float release; //Release time
 	float masking; //Masking scaling
 	float whitening_factor_pc;	//Whitening amount of the reduction percentage
-	float noise_learn_state; //Learn Noise state (Manual-Off-Auto)
+	bool noise_learn_state; //Learn Noise state (Manual-Off-Auto)
 	float adaptive_state; //Autocapture switch
 	float reset_profile; //Reset Noise switch
-	float residual_listen; //For noise only listening
+	bool residual_listen; //For noise only listening
 	float transient_protection; //Multiplier for thresholding onsets with rolling mean
 	float enable; //For soft bypass (click free bypass)
 	float* report_latency; //Latency necessary
+	char* file_location;
 
 	//Parameters values and arrays for the STFT
 	int fft_size; //FFTW input size

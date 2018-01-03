@@ -233,12 +233,12 @@ residual_calulation(int fft_size, float* output_fft_buffer,
 void
 final_spectrum_ensemble(int fft_size, float* final_spectrum,
 												float* residual_spectrum, float* denoised_spectrum,
-												float reduction_amount, float noise_listen)
+												float reduction_amount, bool noise_listen)
 {
   int k;
 
 	//OUTPUT RESULTS using smooth bypass and parametric subtraction
-	if (noise_listen == 0.f)
+	if (!noise_listen)
 	{
 	//Mix residual and processed (Parametric way of noise reduction)
 		for (k = 0; k < fft_size; k++)
