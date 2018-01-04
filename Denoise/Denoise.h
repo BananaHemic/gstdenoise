@@ -56,7 +56,7 @@ struct _GstDenoise
 	float masking; //Masking scaling
 	float whitening_factor_pc;	//Whitening amount of the reduction percentage
 	bool noise_learn_state; //Learn Noise state (Manual-Off-Auto)
-	float adaptive_state; //Autocapture switch
+	bool adaptive_state; //Autocapture switch
 	float reset_profile; //Reset Noise switch
 	bool residual_listen; //For noise only listening
 	float transient_protection; //Multiplier for thresholding onsets with rolling mean

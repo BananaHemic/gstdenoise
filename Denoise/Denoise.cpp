@@ -88,7 +88,7 @@ enum
 #define DEF_MASKING 1.0f
 #define DEF_TRANSIENT_PROTECTION 0
 #define DEF_RESIDUAL FALSE
-#define DEF_AUTO_LEARN 0
+#define DEF_AUTO_LEARN TRUE
 #define DEF_BUILD_NOISE_PROFILE FALSE
 #define DEF_NOISE_FILE "noise.fft"
 
@@ -167,8 +167,8 @@ gst_denoise_class_init(GstDenoiseClass * klass)
 			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
 	g_object_class_install_property(gobject_class, PROP_AUTO_LEARN,
-		g_param_spec_float("auto", "auto learn",
-			"Automatically learn and apply noise profile", 0, G_MAXFLOAT, DEF_AUTO_LEARN,
+		g_param_spec_boolean("auto", "auto learn",
+			"Automatically learn and apply noise profile", DEF_AUTO_LEARN,
 			(GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
 	g_object_class_install_property(gobject_class, PROP_BUILD_NOISE_PROFILE,
@@ -254,7 +254,7 @@ gst_denoise_set_property(GObject * object, guint prop_id,
 		filter->residual_listen = g_value_get_boolean(value);
 		break;
 	case PROP_AUTO_LEARN:
-		filter->adaptive_state = g_value_get_float(value);
+		filter->adaptive_state = g_value_get_boolean(value);
 		break;
 	case PROP_BUILD_NOISE_PROFILE:
 		filter->noise_learn_state = g_value_get_boolean(value);
@@ -301,7 +301,7 @@ gst_denoise_get_property(GObject * object, guint prop_id,
 		g_value_set_boolean(value, filter->residual_listen );
 		break;
 	case PROP_AUTO_LEARN:
-		g_value_set_float(value, filter->adaptive_state );
+		g_value_set_boolean(value, filter->adaptive_state );
 		break;
 	case PROP_BUILD_NOISE_PROFILE:
 		g_value_set_boolean(value, filter->noise_learn_state );
@@ -462,7 +462,7 @@ gst_denoise_setup(GstAudioFilter * filter,
 	self->reset_profile = 0;
 
 	// If configured, load a noise profile from a file
-	if (!self->noise_learn_state && self->adaptive_state == 0.f){
+	if (!self->noise_learn_state && !self->adaptive_state){
 		g_print("Will load noise data from file:\"%s\"\n", self->file_location);
 		FILE *save_file;
 		if (0 != fopen_s(&save_file, self->file_location, "r")) {
@@ -713,7 +713,7 @@ gst_denoise_filter_inplace(GstBaseTransform * base_transform,
 			if (!is_empty(self->fft_p2, self->fft_size_2))
 			{
 				//If adaptive noise is selected the noise is adapted in time
-				if (self->adaptive_state == 1.f)
+				if (self->adaptive_state)
 				{
 					//This has to be revised(issue 8 on github)
 					adapt_noise(self->fft_p2, self->fft_size_2, self->noise_thresholds_p2,

@@ -70,7 +70,7 @@ preprocessing(float noise_thresholds_offset, float* fft_p2,
 							float* bark_z, float* absolute_thresholds, float* SSF,
 							float release_coeff, float* spreaded_unity_gain_bark_spectrum,
 							float* spl_reference_values, float* alpha_masking, float* beta_masking,
-							float masking_value, float adaptive_state, float reduction_value,
+							float masking_value, bool adaptive_state, float reduction_value,
 							float* transient_preserv_prev, float* tp_window_count, float* tp_r_mean,
 							bool* transient_present, float transient_protection)
 {
@@ -89,7 +89,7 @@ preprocessing(float noise_thresholds_offset, float* fft_p2,
 
 	//CALCULATION OF ALPHA WITH MASKING THRESHOLDS USING VIRAGS METHOD
 
-	if(masking_value > 1.f && adaptive_state == 0.f){ //Only when adaptive is off
+	if(masking_value > 1.f && !adaptive_state){ //Only when adaptive is off
 		compute_alpha_and_beta(fft_p2, noise_thresholds_p2, fft_size_2,
 													 alpha_masking, beta_masking, bark_z, absolute_thresholds,
 													 SSF, spreaded_unity_gain_bark_spectrum, spl_reference_values,
@@ -105,7 +105,7 @@ preprocessing(float noise_thresholds_offset, float* fft_p2,
 	//Scale noise thresholds (equals applying an oversubtraction factor in spectral subtraction)
 	for (k = 0; k <= fft_size_2; k++)
 	{
-		if(adaptive_state == 0.f)
+		if(!adaptive_state)
 		{
 			noise_thresholds_scaled[k] = noise_thresholds_p2[k] * noise_thresholds_offset * alpha_masking[k];
 		}
@@ -117,7 +117,7 @@ preprocessing(float noise_thresholds_offset, float* fft_p2,
 
 	//------SMOOTHING DETECTOR------
 
-	if(adaptive_state == 0.f) //Only when adaptive is off
+	if(!adaptive_state) //Only when adaptive is off
 	{
 		memcpy(smoothed_spectrum,fft_p2,sizeof(float)*(fft_size_2+1));
 
@@ -141,13 +141,13 @@ preprocessing(float noise_thresholds_offset, float* fft_p2,
 */
 void
 spectral_gain(float* fft_p2, float* noise_thresholds_p2, float* noise_thresholds_scaled,
-							float* smoothed_spectrum, int fft_size_2, float adaptive, float* Gk,
+							float* smoothed_spectrum, int fft_size_2, bool adaptive, float* Gk,
 							float transient_protection, bool transient_present)
 {
 	//------REDUCTION GAINS------
 
 	//Get reduction to apply
-	if(adaptive == 1.f)
+	if(adaptive)
 	{
 		power_subtraction(fft_size_2, fft_p2, noise_thresholds_scaled, Gk);
 	}
