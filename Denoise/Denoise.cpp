@@ -825,6 +825,7 @@ gst_denoise_filter_inplace(GstBaseTransform * base_transform,
 			}
 			//-------------------------------
 		}
+		//g_print("Latency = %i\n", self->input_latency);
 		break;
 	}
 	default:
@@ -835,6 +836,12 @@ gst_denoise_filter_inplace(GstBaseTransform * base_transform,
 		break;
 	}
 	gst_buffer_unmap(buf, &map);
+	// Account for added latency
+	GstClockTime was = buf->pts;
+	GstClockTime latency_time = (self->input_latency / self->samp_rate) * GST_SECOND;
+	buf->pts = buf->pts > latency_time ? buf->pts - latency_time : buf->pts;
+	GST_DEBUG("Latency %" GST_TIME_FORMAT " Time was %" GST_TIME_FORMAT " now %" GST_TIME_FORMAT " \n",
+		GST_TIME_ARGS(latency_time), GST_TIME_ARGS(was), GST_TIME_ARGS(buf->pts));
 
 	return flow;
 }
