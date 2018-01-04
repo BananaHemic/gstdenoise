@@ -21,25 +21,25 @@ extern "C" {
 
 #define NOISE_ARRAY_STATE_MAX_SIZE 8192 //max alloc size of the noise_thresholds to save with the session. This will consider upto fs of 192 kHz with aprox 23hz resolution
 
-GST_DEBUG_CATEGORY_STATIC(audiofiltertemplate_debug);
-#define GST_CAT_DEFAULT audiofiltertemplate_debug
+GST_DEBUG_CATEGORY_STATIC(denoise_debug);
+#define GST_CAT_DEFAULT denoise_debug
 
-typedef struct _GstAudioFilterTemplate GstAudioFilterTemplate;
-typedef struct _GstAudioFilterTemplateClass GstAudioFilterTemplateClass;
+typedef struct _GstDenoise GstDenoise;
+typedef struct _GstDenoiseClass GstDenoiseClass;
 
 /* These are boilerplate cast macros and type check macros */
-#define GST_TYPE_AUDIO_FILTER_TEMPLATE \
-  (gst_audio_filter_template_get_type())
-#define GST_AUDIO_FILTER_TEMPLATE(obj) \
-  (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_AUDIO_FILTER_TEMPLATE,GstAudioFilterTemplate))
-#define GST_AUDIO_FILTER_TEMPLATE_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_AUDIO_FILTER_TEMPLATE,GstAudioFilterTemplateClass))
-#define GST_IS_AUDIO_FILTER_TEMPLATE(obj) \
-  (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_AUDIO_FILTER_TEMPLATE))
-#define GST_IS_AUDIO_FILTER_TEMPLATE_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_AUDIO_FILTER_TEMPLATE))
+#define GST_TYPE_DENOISE \
+  (gst_denoise_get_type())
+#define GST_DENOISE(obj) \
+  (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_DENOISE,GstDenoise))
+#define GST_DENOISE_CLASS(klass) \
+  (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_DENOISE,GstDenoiseClass))
+#define GST_IS_DENOISE(obj) \
+  (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_DENOISE))
+#define GST_IS_DENOISE_CLASS(klass) \
+  (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_DENOISE))
 
-struct _GstAudioFilterTemplate
+struct _GstDenoise
 {
 	GstAudioFilter audiofilter;
 
@@ -156,25 +156,25 @@ struct _GstAudioFilterTemplate
 	fftwf_plan forward_at;
 };
 
-struct _GstAudioFilterTemplateClass
+struct _GstDenoiseClass
 {
 	GstAudioFilterClass audiofilter_class;
 };
 
-G_DEFINE_TYPE(GstAudioFilterTemplate, gst_audio_filter_template,
+G_DEFINE_TYPE(GstDenoise, gst_denoise,
 	GST_TYPE_AUDIO_FILTER);
 
-static void gst_audio_filter_template_set_property(GObject * object,
+static void gst_denoise_set_property(GObject * object,
 	guint prop_id, const GValue * value, GParamSpec * pspec);
-static void gst_audio_filter_template_get_property(GObject * object,
+static void gst_denoise_get_property(GObject * object,
 	guint prop_id, GValue * value, GParamSpec * pspec);
 
-static gboolean gst_audio_filter_template_setup(GstAudioFilter * filter,
+static gboolean gst_denoise_setup(GstAudioFilter * filter,
 	const GstAudioInfo * info);
-static GstFlowReturn gst_audio_filter_template_filter(GstBaseTransform * bt,
+static GstFlowReturn gst_denoise_filter(GstBaseTransform * bt,
 	GstBuffer * outbuf, GstBuffer * inbuf);
 static GstFlowReturn
-gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
+gst_denoise_filter_inplace(GstBaseTransform * base_transform,
 	GstBuffer * buf);
 static gboolean
-gst_audio_filter_template_stop(GstBaseTransform *trans);
+gst_denoise_stop(GstBaseTransform *trans);

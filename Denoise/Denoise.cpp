@@ -1,7 +1,5 @@
-/* GStreamer audio filter example class
-* Copyright (C) <1999> Erik Walthinsen <omega@cse.ogi.edu>
-* Copyright (C) <2003> David Schleef <ds@schleef.org>
-* Copyright (C) YEAR AUTHOR_NAME AUTHOR_EMAIL
+/* GStreamer audio noise filter
+* Copyright (C) <2018> Bananahemic <...>
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -43,14 +41,17 @@
 */
 
 /**
-* SECTION:element-plugin
+* SECTION: Denoise
 *
-* FIXME:Describe plugin here.
+* Allows removing noise from live and non-live audio streams
+* Either through automatically guessing the noise, or by
+* Building a noise model by providing the element just noise
+* and then later applying the noise
 *
 * <refsect2>
 * <title>Example launch line</title>
 * |[
-* gst-launch -v -m audiotestsrc ! plugin ! autoaudiosink
+* gst-launch -v -m autoaudiosrc ! audioconvert ! denoise ! audioconvert ! autoaudiosink
 * ]|
 * </refsect2>
 */
@@ -106,7 +107,7 @@ enum
 
 /* GObject vmethod implementations */
 static void
-gst_audio_filter_template_class_init(GstAudioFilterTemplateClass * klass)
+gst_denoise_class_init(GstDenoiseClass * klass)
 {
 	GObjectClass *gobject_class;
 	GstElementClass *element_class;
@@ -126,8 +127,8 @@ gst_audio_filter_template_class_init(GstAudioFilterTemplateClass * klass)
 			G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 #endif
 
-	gobject_class->set_property = gst_audio_filter_template_set_property;
-	gobject_class->get_property = gst_audio_filter_template_get_property;
+	gobject_class->set_property = gst_denoise_set_property;
+	gobject_class->get_property = gst_denoise_get_property;
 
 	// All our properties
 	g_object_class_install_property(gobject_class, PROP_RELEASE_TIME,
@@ -182,14 +183,14 @@ gst_audio_filter_template_class_init(GstAudioFilterTemplateClass * klass)
 
 	/* this function will be called when the format is set before the
 	* first buffer comes in, and whenever the format changes */
-	audio_filter_class->setup = gst_audio_filter_template_setup;
+	audio_filter_class->setup = gst_denoise_setup;
 
-	btrans_class->stop = gst_audio_filter_template_stop;
+	btrans_class->stop = gst_denoise_stop;
 
 	/* here you set up functions to process data (either in place, or from
 	* one input buffer to another output buffer); only one is required */
-	//btrans_class->transform = gst_audio_filter_template_filter;
-	btrans_class->transform_ip = gst_audio_filter_template_filter_inplace;
+	//btrans_class->transform = gst_denoise_filter;
+	btrans_class->transform_ip = gst_denoise_filter_inplace;
 	/* Set some basic metadata about your new element */
 	gst_element_class_set_details_simple(element_class,
 		"Audio Filter Template", /* FIXME: short name */
@@ -203,10 +204,10 @@ gst_audio_filter_template_class_init(GstAudioFilterTemplateClass * klass)
 }
 
 static void
-gst_audio_filter_template_init(GstAudioFilterTemplate * filter)
+gst_denoise_init(GstDenoise * filter)
 {
-	GstAudioFilterTemplate *self;
-	self = GST_AUDIO_FILTER_TEMPLATE(filter);
+	GstDenoise *self;
+	self = GST_DENOISE(filter);
 
 	self->release = DEF_RELEASE_TIME;
 	self->amount_of_reduction = DEF_INTENSITY;
@@ -224,10 +225,10 @@ gst_audio_filter_template_init(GstAudioFilterTemplate * filter)
 }
 
 static void
-gst_audio_filter_template_set_property(GObject * object, guint prop_id,
+gst_denoise_set_property(GObject * object, guint prop_id,
 	const GValue * value, GParamSpec * pspec)
 {
-	GstAudioFilterTemplate *filter = GST_AUDIO_FILTER_TEMPLATE(object);
+	GstDenoise *filter = GST_DENOISE(object);
 
 	GST_OBJECT_LOCK(filter);
 	switch (prop_id) {
@@ -271,13 +272,43 @@ gst_audio_filter_template_set_property(GObject * object, guint prop_id,
 }
 
 static void
-gst_audio_filter_template_get_property(GObject * object, guint prop_id,
+gst_denoise_get_property(GObject * object, guint prop_id,
 	GValue * value, GParamSpec * pspec)
 {
-	GstAudioFilterTemplate *filter = GST_AUDIO_FILTER_TEMPLATE(object);
+	GstDenoise *filter = GST_DENOISE(object);
 
 	GST_OBJECT_LOCK(filter);
 	switch (prop_id) {
+	case PROP_RELEASE_TIME:
+		g_value_set_float(value, filter->release);
+		break;
+	case PROP_INTENSITY:
+		g_value_set_float(value, filter->amount_of_reduction);
+		break;
+	case PROP_NOISE_OFFSET:
+		g_value_set_float(value, filter->noise_thresholds_offset );
+		break;
+	case PROP_WHITENING_FACTOR:
+		g_value_set_float(value, filter->whitening_factor );
+		break;
+	case PROP_MASKING:
+		g_value_set_float(value, filter->masking );
+		break;
+	case PROP_TRANSIENT_PROTECTION:
+		g_value_set_float(value, filter->transient_protection );
+		break;
+	case PROP_RESIDUAL:
+		g_value_set_boolean(value, filter->residual_listen );
+		break;
+	case PROP_AUTO_LEARN:
+		g_value_set_float(value, filter->adaptive_state );
+		break;
+	case PROP_BUILD_NOISE_PROFILE:
+		g_value_set_boolean(value, filter->noise_learn_state );
+		break;
+	case PROP_NOISE_FILE:
+		g_value_set_string(value, filter->file_location );
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 		break;
@@ -286,14 +317,14 @@ gst_audio_filter_template_get_property(GObject * object, guint prop_id,
 }
 
 static gboolean
-gst_audio_filter_template_setup(GstAudioFilter * filter,
+gst_denoise_setup(GstAudioFilter * filter,
 	const GstAudioInfo * info)
 {
-	GstAudioFilterTemplate *self;
+	GstDenoise *self;
 	GstAudioFormat fmt;
 	gint chans, rate;
 
-	self = GST_AUDIO_FILTER_TEMPLATE(filter);
+	self = GST_DENOISE(filter);
 
 	rate = GST_AUDIO_INFO_RATE(info);
 	chans = GST_AUDIO_INFO_CHANNELS(info);
@@ -330,7 +361,7 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 	self->out_fifo = (float*)calloc(self->fft_size, sizeof(float));
 	self->output_accum = (float*)calloc(self->fft_size*2, sizeof(float));
 	self->overlap_factor = OVERLAP_FACTOR;
-	self->hop = self->fft_size/self->overlap_factor;
+	self->hop = (int)(self->fft_size/self->overlap_factor);
 	self->input_latency = self->fft_size - self->hop;
 	self->read_ptr = self->input_latency; //the initial position because we are that many samples ahead
 
@@ -404,14 +435,14 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 	initialize_array(self->Gk,1.f,self->fft_size);
 
 	//Compute adaptive initial thresholds
-	compute_auto_thresholds(self->auto_thresholds, self->fft_size, self->fft_size_2,
+	compute_auto_thresholds(self->auto_thresholds, (float)self->fft_size, (float)self->fft_size_2,
 													self->samp_rate);
 
 	//MASKING initializations
-	compute_bark_mapping(self->bark_z, self->fft_size_2, self->samp_rate);
+	compute_bark_mapping(self->bark_z, self->fft_size_2, (int)self->samp_rate);
 	compute_absolute_thresholds(self->absolute_thresholds, self->fft_size_2,
-															self->samp_rate);
-	spl_reference(self->spl_reference_values, self->fft_size_2, self->samp_rate,
+															(int)self->samp_rate);
+	spl_reference(self->spl_reference_values, self->fft_size_2, (int)self->samp_rate,
 								self->input_fft_buffer_at, self->output_fft_buffer_at,
 								&self->forward_at);
 	compute_SSF(self->SSF);
@@ -442,7 +473,7 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 			char str_buff[BUFF_SIZE];
 			for (int i = 0; i < self->fft_size_2 + 1; i++) {
 				fgets(str_buff, BUFF_SIZE, save_file);
-				self->noise_thresholds_p2[i] = atof(str_buff);
+				self->noise_thresholds_p2[i] = (float)atof(str_buff);
 				memset(str_buff, 0, sizeof(str_buff));
 			}
 			self->noise_thresholds_availables = true;
@@ -454,9 +485,9 @@ gst_audio_filter_template_setup(GstAudioFilter * filter,
 }
 
 static gboolean
-gst_audio_filter_template_stop(GstBaseTransform *trans) {
+gst_denoise_stop(GstBaseTransform *trans) {
 	g_print("Stopping!\n");
-	GstAudioFilterTemplate *self = GST_AUDIO_FILTER_TEMPLATE(trans);
+	GstDenoise *self = GST_DENOISE(trans);
 
 	// If we have a noise profile, save it to a file
 	if (self->noise_learn_state && self->noise_thresholds_availables){
@@ -555,10 +586,10 @@ gst_audio_filter_template_stop(GstBaseTransform *trans) {
 * with a minimum of memory copies. */
 
 static GstFlowReturn
-gst_audio_filter_template_filter(GstBaseTransform * base_transform,
+gst_denoise_filter(GstBaseTransform * base_transform,
 	GstBuffer * inbuf, GstBuffer * outbuf)
 {
-	GstAudioFilterTemplate *filter = GST_AUDIO_FILTER_TEMPLATE(base_transform);
+	GstDenoise *filter = GST_DENOISE(base_transform);
 	GstMapInfo map_in;
 	GstMapInfo map_out;
 
@@ -580,10 +611,10 @@ gst_audio_filter_template_filter(GstBaseTransform * base_transform,
 }
 
 static GstFlowReturn
-gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
+gst_denoise_filter_inplace(GstBaseTransform * base_transform,
 	GstBuffer * buf)
 {
-	GstAudioFilterTemplate *self = GST_AUDIO_FILTER_TEMPLATE(base_transform);
+	GstDenoise *self = GST_DENOISE(base_transform);
 	GstFlowReturn flow = GST_FLOW_OK;
 	GstMapInfo map;
 
@@ -622,7 +653,7 @@ gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
 		g_print("Failed mapping!\n");
 		return GST_FLOW_ERROR;
 	}
-	guint n_samples = 0;
+	gint n_samples = 0;
 	gint k = 0;
 	float *samples = (float*) map.data;
 	switch (GST_AUDIO_FILTER_FORMAT(self)) {
@@ -630,8 +661,10 @@ gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
 	//case GST_AUDIO_FORMAT_S16BE: {
 	case GST_AUDIO_FORMAT_F32LE: {
 		//gint16 *samples = (gint16*) map.data;
-		n_samples = map.size / sizeof(float);
-			//main loop for processing
+		n_samples = (gint)map.size / sizeof(float);
+		//g_print("Recv %i\n", n_samples);
+
+		//main loop for processing
 		for (int pos = 0; pos < n_samples; pos++)
 		{
 			//Store samples int the input buffer
@@ -809,19 +842,17 @@ gst_audio_filter_template_filter_inplace(GstBaseTransform * base_transform,
 static gboolean
 plugin_init(GstPlugin * plugin)
 {
-	/* Register debug category for filtering log messages
-	* FIXME:exchange the string 'Template plugin' with your description */
-	GST_DEBUG_CATEGORY_INIT(audiofiltertemplate_debug, "audiofiltertemplate", 0,
-		"Audio filter template example");
+	/* Register debug category for filtering log messages */
+	GST_DEBUG_CATEGORY_INIT(denoise_debug, "denoise", 0,
+		"Noise Remover");
 
 	/* This is the name used in gst-launch-1.0 and gst_element_factory_make() */
-	return gst_element_register(plugin, "audiofiltertemplate", GST_RANK_NONE,
-		GST_TYPE_AUDIO_FILTER_TEMPLATE);
+	return gst_element_register(plugin, "denoise", GST_RANK_NONE,
+		GST_TYPE_DENOISE);
 }
 
 /* gstreamer looks for this structure to register plugins
 *
-* FIXME:exchange the string 'Template plugin' with you plugin description
 */
 #ifndef PACKAGE
 #define PACKAGE "myfirstplugin"
@@ -831,8 +862,8 @@ plugin_init(GstPlugin * plugin)
 GST_PLUGIN_DEFINE(
 	GST_VERSION_MAJOR,
 	GST_VERSION_MINOR,
-	audiofiltertemplateplugin,
-	"Audio filter template plugin",
+	denoise,
+	"Noise Remover",
 	plugin_init,
 	VERSION,
 	"Proprietary",
