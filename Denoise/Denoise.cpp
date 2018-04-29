@@ -221,7 +221,6 @@ gst_denoise_init(GstDenoise * filter)
 
 	free(self->file_location);
 	self->file_location = g_strdup(DEF_NOISE_FILE);
-	g_print("init\n");
 }
 
 static void
@@ -864,6 +863,7 @@ plugin_init(GstPlugin * plugin)
 #ifndef PACKAGE
 #define PACKAGE "myfirstplugin"
 #endif
+
 #define VERSION "0"
 
 GST_PLUGIN_DEFINE(
@@ -873,7 +873,7 @@ GST_PLUGIN_DEFINE(
 	"Noise Remover",
 	plugin_init,
 	VERSION,
-	"Proprietary",
+	"LGPL",
 	"GStreamer",
 	"http://gstreamer.freedesktop.org"
 );
